@@ -37,6 +37,10 @@
   # A list of additional derivations to be included in the image as-is.
   contents ? [ ],
 
+  # Additional empty files and folders to be used for mountpoints
+  emptyFiles ? [ ],
+  emptyDirs ? [ ],
+
   # mksquashfs options
   squashfsTools ? pkgs.squashfsTools,
   squash-compression ? "xz -Xdict-size 100%",
@@ -64,26 +68,32 @@ let
       pname = "root-fs-scaffold";
       inherit version;
 
-      buildCommand = ''
-        # scaffold a file system layout
-        mkdir -p $out/etc/systemd/system $out/proc $out/sys $out/dev $out/run \
-                 $out/tmp $out/var/tmp $out/var/lib $out/var/cache $out/var/log
-
-        # empty files to mount over with host's version
-        touch $out/etc/resolv.conf $out/etc/machine-id
-
-        # required for portable services
-        cp ${os-release} $out/etc/os-release
-      ''
-      # units **must** be copied to /etc/systemd/system/
-      + (lib.concatMapStringsSep "\n" (u: "cp ${u} $out/etc/systemd/system/${u.name};") units)
-      + (lib.concatMapStringsSep "\n" (
-        { object, symlink }:
+      buildCommand =
+        assert lib.assertMsg (lib.all (path: lib.hasPrefix "/" path) (
+          emptyFiles ++ emptyDirs
+        )) "Paths for empty files and empty dirs must be absolute";
         ''
-          mkdir -p $(dirname $out/${symlink});
-          ln -s ${object} $out/${symlink};
+          # scaffold a file system layout
+          mkdir -p $out/etc/systemd/system $out/proc $out/sys $out/dev $out/run \
+                   $out/tmp $out/var/tmp $out/var/lib $out/var/cache $out/var/log \
+                   ${lib.concatMapStringsSep " " (u: "$out${u}") emptyDirs}
+
+          # empty files to mount over with host's version
+          touch $out/etc/resolv.conf $out/etc/machine-id \
+                ${lib.concatMapStringsSep " " (u: "$out${u}") emptyFiles}
+
+          # required for portable services
+          cp ${os-release} $out/etc/os-release
         ''
-      ) symlinks);
+        # units **must** be copied to /etc/systemd/system/
+        + (lib.concatMapStringsSep "\n" (u: "cp ${u} $out/etc/systemd/system/${u.name};") units)
+        + (lib.concatMapStringsSep "\n" (
+          { object, symlink }:
+          ''
+            mkdir -p $(dirname $out/${symlink});
+            ln -s ${object} $out/${symlink};
+          ''
+        ) symlinks);
     };
 in
 
